@@ -1,12 +1,11 @@
 ipython
-sklearn
+scikit-learn
 wheel
 pandas
 bs4
 #cltk
 keras
 tensorflow
-tensorflow-addons
 progress
 sklearn_crfsuite
 lxml

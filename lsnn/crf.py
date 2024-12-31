@@ -7,6 +7,7 @@ import sklearn.model_selection
 # import scikit-learn as sklearn
 
 import sklearn_crfsuite
+from sklearn_crfsuite import metrics
 
 # Class imports
 from lsnn import utilities as util
@@ -72,7 +73,7 @@ class Latin_CRF:
             self.LABELS,
             key=lambda name: (name[1:], name[0])
         )
-        return sklearn_crfsuite.metrics.flat_classification_report(
+        return metrics.flat_classification_report(
             y, y_pred, labels=sorted_labels, output_dict=True)
 
     def fit_model(self, X, y) -> object:

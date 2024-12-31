@@ -1,4 +1,4 @@
-# Standard library imports
+from keras import layers, models, ops
 
 # Third party library imports
 import numpy as np
@@ -7,9 +7,44 @@ import tensorflow as tf
 # Local imports
 from lsnn import utilities as util
 
+class TransformerBlock(layers.Layer):
+    def __init__(self, embed_dim, num_heads, ff_dim, rate=0.1, **kwargs):
+        super().__init__(**kwargs)
+        self.att = layers.MultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
+        self.ffn = models.Sequential(
+            [layers.Dense(ff_dim, activation="relu"), layers.Dense(embed_dim),]
+        )
+        self.layernorm1 = layers.LayerNormalization(epsilon=1e-6)
+        self.layernorm2 = layers.LayerNormalization(epsilon=1e-6)
+        self.dropout1 = layers.Dropout(rate)
+        self.dropout2 = layers.Dropout(rate)
+
+    def call(self, inputs):
+        attn_output = self.att(inputs, inputs)
+        attn_output = self.dropout1(attn_output)
+        out1 = self.layernorm1(inputs + attn_output)
+        ffn_output = self.ffn(out1)
+        ffn_output = self.dropout2(ffn_output)
+        return self.layernorm2(out1 + ffn_output)
+
+class TokenAndPositionEmbedding(layers.Layer):
+    def __init__(self, maxlen, vocab_size, embed_dim, **kwargs):
+        super().__init__(**kwargs)
+        self.token_emb = layers.Embedding(input_dim=vocab_size, output_dim=embed_dim)
+        self.pos_emb = layers.Embedding(input_dim=maxlen, output_dim=embed_dim)
+
+    def call(self, x):
+        maxlen = ops.shape(x)[-1]
+        positions = ops.arange(start=0, stop=maxlen, step=1)
+        positions = self.pos_emb(positions)
+        x = self.token_emb(x)
+        return x + positions
+
+
+
 # Based on https://www.depends-on-the-definition.com/guide-sequence-tagging-neural-networks-python/
 
-class Latin_LSTM():
+class Latin_Transformer():
     """This class provides the user with tools to create an LSTM model for scanning Latin. On startup,
     it prepares the padding procedures and creates syllable and label dictionaries for the one-hot encoding
     used by the LSTM. Having done that, the class can create and save models and predict custom syllable-label lists.
@@ -136,78 +171,84 @@ class Latin_LSTM():
             model.save(path)
 
         return model, history
+     
 
-    def get_model(self):
-        """Returns the LSTM model from the given parameters. Also allows a model to be loaded from disk
+    def get_model(self, embed_dim=32, num_heads=2, ff_dim=32):
+        """
+        Build a Transformer-based classification model.
 
         Args:
+            d_model: Integer, the dimension of the Transformer embeddings.
+            num_heads: Integer, the number of attention heads.
+            ff_dim: Integer, the dimension of the feed-forward network.
+            num_layers: Integer, the number of Transformer layers.
 
         Returns:
-            _type_: _description_
+            A compiled Keras model.
         """
-        
-        do_crf: bool = False
 
-        embedding_output_dim: int = 25 # 25      
-        lstm_layer_units: int = 10 # 10
-        LEARNING_RATE: float = 0.001
-            
-        # Initiate the model structure
-        print(self.max_sentence_length, len(self.LABELS))
-        input_layer = tf.keras.layers.Input(shape=(self.max_sentence_length,))
-        
-        model = tf.keras.layers.Embedding(
-            input_dim = len(self.unique_syllables), 
-            output_dim = embedding_output_dim, 
-            input_length = self.max_sentence_length
-        )(input_layer)
+        # Define input layer
+        inputs = layers.Input(shape=(self.max_sentence_length,))
 
-        # model = Dropout(0.1)(model)
+        # Define and add embedding layer
+        embedding_layer = TokenAndPositionEmbedding(self.max_sentence_length, len(self.unique_syllables), embed_dim)
+        x = embedding_layer(inputs)
 
-        # model = tf.keras.layers.LSTM(
-        #         units = lstm_layer_units, 
-        #         return_sequences = True, 
-        #         recurrent_dropout = 0.1
-        #     )(model)
+        # Define and add Transformer block (including attention, normalisation and dropout layers)
+        transformer_block = TransformerBlock(embed_dim, num_heads, ff_dim)
+        x = transformer_block(x)
+        x = layers.GlobalAveragePooling1D(keepdims=True, data_format="channels_first")(x)
+        #x = layers.Dropout(0.1)(x)
+        x = layers.Dense(20, activation="relu")(x)
+        x = layers.Dropout(0.1)(x)
 
-        model = tf.keras.layers.Bidirectional(
-            tf.keras.layers.LSTM(
-                units = lstm_layer_units, 
-                return_sequences = True, 
-                recurrent_dropout = 0.1
-            )
-        )(model)
+        # Define and add output layer
+        outputs = layers.Dense(len(self.LABELS), activation="softmax")(x)
 
-        model = tf.keras.layers.Dense(len(self.LABELS), activation='softmax')(model)
-
-        # output_layer = TimeDistributed(Dense(50, activation="softmax"))(model)  # softmax output layer
-        # kernel = TimeDistributed(Dense(num_labels, activation="softmax"))(model)  # softmax output layer
-
-        if do_crf:
-            crf = tfa.layers.CRF(units = len(self.LABELS))
-            decoded_sequence, model, sequence_length, chain_kernel = crf(model)
-            # tfa.losses.SigmoidFocalCrossEntropy(),
-            # print(decoded_sequence.shape, potentials.shape, sequence_length.shape, chain_kernel.shape)
-
-        model = tf.keras.models.Model(input_layer, model)
-
-        model.compile(
-            # optimizer="rmsprop",
-            optimizer=tf.keras.optimizers.Adam(
-                learning_rate = LEARNING_RATE
-            ),  # Optimizer
-            # Loss function to minimize
-            loss=tf.keras.losses.CategoricalCrossentropy(),
-            # loss=tfa.losses.SigmoidFocalCrossEntropy(),
-            # List of metrics to monitor
-            # metrics=[tf.keras.metrics.SparseCategoricalAccuracy()],
-            # metrics=tf.keras.metrics.CategoricalAccuracy(),
-            metrics=['accuracy'],
-        )
+        # Compile model
+        model = models.Model(inputs=inputs, outputs=outputs)
+        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
         print(model.summary())
 
-        return model        
+        return model
+
+    """
+    # Define the Transformer model
+    def get_model(self, d_model=128, num_heads=4, ff_dim=256, num_layers=2):
+        
+        inputs = layers.Input(shape=(self.max_sentence_length,))  # Input shape is (29,)
+
+        # add embedding layer
+
+        # Expand dimensions to make it compatible with Transformer (add sequence dimension)
+        x = layers.Reshape((self.max_sentence_length, 1))(inputs)  # Reshape to (29, 1)
+
+        # Dense layer to project input to d_model dimensions
+        x = layers.Dense(d_model)(x)
+
+        # Transformer Encoder Layers
+        for _ in range(num_layers):
+            # Multi-Head Attention
+            attention_output = layers.MultiHeadAttention(num_heads=num_heads, key_dim=d_model)(x, x)
+            attention_output = layers.LayerNormalization(epsilon=1e-6)(attention_output + x)
+
+            # Feed-Forward Network
+            ffn = layers.Dense(ff_dim, activation='relu')(attention_output)
+            ffn = layers.Dense(d_model)(ffn)
+            x = layers.LayerNormalization(epsilon=1e-6)(ffn + attention_output)
+
+        # Global average pooling to reduce sequence dimension
+        x = layers.GlobalAveragePooling1D()(x)
+
+        # Output Layer for Classification
+        outputs = layers.Dense(len(self.LABELS), activation='softmax')(x)
+
+        # Compile Model
+        model = models.Model(inputs=inputs, outputs=outputs)
+        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+        return model
+    """
 
     def fit_model(self, 
         model,
@@ -328,6 +369,9 @@ class Latin_LSTM():
         y = tf.keras.utils.pad_sequences(maxlen=max_sentence_length, sequences=y, padding="post", value=label2idx[self.PADDING])
         # for training the network we also need to change the labels to categorial.
         y = np.array([tf.keras.utils.to_categorical(i, num_classes=len(self.LABELS)) for i in y])
+
+        print(X.shape)
+        print(y.shape)
 
         return X, y
 
