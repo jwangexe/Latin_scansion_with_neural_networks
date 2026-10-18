@@ -141,3 +141,15 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# TransScan demo (hf_space/)
+!hf_space/build/
+hf_space/build/heldout/
+hf_space/build/crf.pkl
+*.npy
+models/lstm/*_diverged.keras
+models/lstm/*_seed*.keras
+.claude/
+hf_space/build/make_heldout.py
+hf_space/build/eval_heldout.py
+hf_space/model/heldout_metrics.json
