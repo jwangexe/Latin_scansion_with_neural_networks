@@ -4,6 +4,8 @@
 **▶ [Try the live demo](https://huggingface.co/spaces/jwangexe/latin-scansion)**: type a line of Latin verse and see every
 syllable scanned as long, short or elided, by a Transformer, an LSTM or a CRF. It runs entirely in your browser.
 
+**▶ [Published and presented at the 8th ISBDAS](https://ieeexplore.ieee.org/abstract/document/11116809)**
+
 ## About this project
 
 This repository extends **Luuk Nolden's Master's thesis project**,
